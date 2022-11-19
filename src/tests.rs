@@ -1,29 +1,42 @@
 use super::*;
 
-#[track_caller]
+#[inline]
 fn same(fmt: &'static str, p: &[Piece<'static>]) {
-    let parser = Parser::new(fmt, None, None, false, ParseMode::Format);
-    assert_eq!(parser.collect::<Vec<Piece<'static>>>(), p);
+    displaymatches(fmt, fmt);
+    piecesmatch(fmt, p);
 }
 
-fn fmtdflt() -> FormatSpec<'static> {
-    return FormatSpec {
-        fill: None,
-        align: AlignUnknown,
-        flags: 0,
-        precision: CountImplied,
-        width: CountImplied,
-        precision_span: None,
-        width_span: None,
-        ty: "",
-        ty_span: None,
-    };
+#[track_caller]
+fn piecesmatch(fmt: &'static str, p: &[Piece<'static>]) {
+    let parser = Parser::new(fmt, None, None, false, ParseMode::Format);
+    assert_eq!(parser.collect::<Vec<Piece<'static>>>(), p);
 }
 
 fn musterr(s: &str) {
     let mut p = Parser::new(s, None, None, false, ParseMode::Format);
     p.next();
     assert!(!p.errors.is_empty());
+}
+
+#[track_caller]
+fn displaymatches(fmt: &'static str, test: &'static str) {
+    let parser = Parser::new(fmt, None, None, false, ParseMode::Format);
+
+    struct Printer<'a>(std::cell::RefCell<Option<Parser<'a>>>);
+
+    impl<'a> std::fmt::Display for Printer<'a> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            if let Some(parser) = self.0.take() {
+                for piece in parser {
+                    piece.fmt(f)?;
+                }
+            }
+            Ok(())
+        }
+    }
+
+    let output = Printer(Some(parser).into()).to_string();
+    assert_eq!(test, output);
 }
 
 #[test]
@@ -79,7 +92,7 @@ fn format_nothing() {
         &[NextArgument(Argument {
             position: ArgumentImplicitlyIs(0),
             position_span: InnerSpan { start: 2, end: 2 },
-            format: fmtdflt(),
+            format: Default::default(),
         })],
     );
 }
@@ -90,18 +103,19 @@ fn format_position() {
         &[NextArgument(Argument {
             position: ArgumentIs(3),
             position_span: InnerSpan { start: 2, end: 3 },
-            format: fmtdflt(),
+            format: Default::default(),
         })],
     );
 }
 #[test]
 fn format_position_nothing_else() {
-    same(
+    displaymatches("{3:}", "{3}");
+    piecesmatch(
         "{3:}",
         &[NextArgument(Argument {
             position: ArgumentIs(3),
             position_span: InnerSpan { start: 2, end: 3 },
-            format: fmtdflt(),
+            format: Default::default(),
         })],
     );
 }
@@ -112,7 +126,7 @@ fn format_named() {
         &[NextArgument(Argument {
             position: ArgumentNamed("name"),
             position_span: InnerSpan { start: 2, end: 6 },
-            format: fmtdflt(),
+            format: Default::default(),
         })],
     )
 }
@@ -389,20 +403,22 @@ fn format_mixture() {
 }
 #[test]
 fn format_whitespace() {
-    same(
+    displaymatches("{ }", "{}");
+    piecesmatch(
         "{ }",
         &[NextArgument(Argument {
             position: ArgumentImplicitlyIs(0),
             position_span: InnerSpan { start: 2, end: 3 },
-            format: fmtdflt(),
+            format: Default::default(),
         })],
     );
-    same(
+    displaymatches("{  }", "{}");
+    piecesmatch(
         "{  }",
         &[NextArgument(Argument {
             position: ArgumentImplicitlyIs(0),
             position_span: InnerSpan { start: 2, end: 4 },
-            format: fmtdflt(),
+            format: Default::default(),
         })],
     );
 }

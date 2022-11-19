@@ -10,6 +10,8 @@ pub use Flag::*;
 pub use Piece::*;
 pub use Position::*;
 
+use std::fmt::Display;
+use std::fmt::Write;
 use std::iter;
 use std::str;
 use std::string;
@@ -37,8 +39,8 @@ pub enum ParseMode {
     InlineAsm,
 }
 
-#[derive(Copy, Clone)]
-struct InnerOffset(usize);
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct InnerOffset(pub usize);
 
 impl InnerOffset {
     fn to(self, end: InnerOffset) -> InnerSpan {
@@ -48,7 +50,7 @@ impl InnerOffset {
 
 /// A piece is a portion of the format string which represents the next part
 /// to emit. These are emitted as a stream by the `Parser` class.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Piece<'a> {
     /// A literal string which should directly be emitted
     String(&'a str),
@@ -57,8 +59,23 @@ pub enum Piece<'a> {
     NextArgument(Argument<'a>),
 }
 
+impl<'a> Display for Piece<'a> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            String(s) => {
+                if let Some(c @ ('{' | '}')) = s.chars().next() {
+                    f.write_char(c)?;
+                }
+                s.fmt(f)
+            }
+            NextArgument(a) => a.fmt(f),
+        }
+    }
+}
+
 /// Representation of an argument specification.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Argument<'a> {
     /// Where to find this argument
     pub position: Position<'a>,
@@ -69,8 +86,18 @@ pub struct Argument<'a> {
     pub format: FormatSpec<'a>,
 }
 
+impl<'a> Display for Argument<'a> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_char('{')?;
+        self.position.fmt(f)?;
+        self.format.fmt(f)?;
+        f.write_char('}')
+    }
+}
+
 /// Specification for the formatting of an argument in the format string.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct FormatSpec<'a> {
     /// Optionally specified character to fill alignment with.
     pub fill: Option<char>,
@@ -94,8 +121,74 @@ pub struct FormatSpec<'a> {
     pub ty_span: Option<InnerSpan>,
 }
 
+impl<'a> FormatSpec<'a> {
+    pub fn new(ty: &'a str) -> Self {
+        Self {
+            fill: None,
+            align: AlignUnknown,
+            flags: 0,
+            precision: CountImplied,
+            precision_span: None,
+            width: CountImplied,
+            width_span: None,
+            ty,
+            ty_span: None,
+        }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.fill.is_none()
+            && self.align == AlignUnknown
+            && self.flags == 0
+            && self.precision == CountImplied
+            && self.width == CountImplied
+            && self.ty.is_empty()
+    }
+}
+
+impl<'a> Default for FormatSpec<'a> {
+    #[inline]
+    fn default() -> Self {
+        Self::new("")
+    }
+}
+
+impl<'a> Display for FormatSpec<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.is_empty() {
+            return Ok(());
+        }
+        f.write_char(':')?;
+        if let Some(fill) = self.fill {
+            f.write_char(fill)?;
+        }
+        self.align.fmt(f)?;
+        if self.flags & (1 << FlagSignPlus as u32) != 0 {
+            f.write_char('+')?;
+        } else if self.flags & (1 << FlagSignMinus as u32) != 0 {
+            f.write_char('-')?;
+        }
+        if self.flags & (1 << FlagAlternate as u32) != 0 {
+            f.write_char('#')?;
+        }
+        if self.flags & (1 << FlagSignAwareZeroPad as u32) != 0 {
+            f.write_char('0')?;
+        }
+        self.width.fmt(f)?;
+        if self.precision != CountImplied {
+            f.write_char('.')?;
+            self.precision.fmt(f)?;
+        }
+        if self.flags & (1 << FlagDebugLowerHex as u32) != 0 {
+            f.write_char('x')?;
+        } else if self.flags & (1 << FlagDebugUpperHex as u32) != 0 {
+            f.write_char('X')?;
+        }
+        self.ty.fmt(f)
+    }
+}
+
 /// Enum describing where an argument for a format can be located.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Position<'a> {
     /// The argument is implied to be located at an index
     ArgumentImplicitlyIs(usize),
@@ -114,8 +207,19 @@ impl Position<'_> {
     }
 }
 
+impl<'a> Display for Position<'a> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArgumentImplicitlyIs(_) => Ok(()),
+            ArgumentIs(p) => p.fmt(f),
+            ArgumentNamed(s) => s.fmt(f),
+        }
+    }
+}
+
 /// Enum of alignments which are supported.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Alignment {
     /// The value will be aligned to the left.
     AlignLeft,
@@ -127,9 +231,21 @@ pub enum Alignment {
     AlignUnknown,
 }
 
+impl Display for Alignment {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AlignLeft => f.write_char('<'),
+            AlignRight => f.write_char('>'),
+            AlignCenter => f.write_char('^'),
+            AlignUnknown => Ok(()),
+        }
+    }
+}
+
 /// Various flags which can be applied to format strings. The meaning of these
 /// flags is defined by the formatters themselves.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Flag {
     /// A `+` will be used to denote positive numbers.
     FlagSignPlus,
@@ -149,7 +265,7 @@ pub enum Flag {
 
 /// A count is used for the precision and width parameters of an integer, and
 /// can reference either an argument or a literal integer.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Count<'a> {
     /// The count is specified explicitly.
     CountIs(usize),
@@ -163,6 +279,25 @@ pub enum Count<'a> {
     CountImplied,
 }
 
+impl<'a> Display for Count<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CountIs(p) => p.fmt(f),
+            CountIsName(s, _) => {
+                s.fmt(f)?;
+                f.write_char('$')
+            }
+            CountIsParam(p) => {
+                p.fmt(f)?;
+                f.write_char('$')
+            }
+            CountIsStar(_) => f.write_char('*'),
+            CountImplied => Ok(()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParseError {
     pub description: string::String,
     pub note: Option<string::String>,
@@ -178,6 +313,7 @@ pub struct ParseError {
 ///
 /// This is a recursive-descent parser for the sake of simplicity, and if
 /// necessary there's probably lots of room for improvement performance-wise.
+#[derive(Clone, Debug)]
 pub struct Parser<'a> {
     mode: ParseMode,
     input: &'a str,
@@ -509,7 +645,11 @@ impl<'a> Parser<'a> {
             }
         };
 
-        Argument { position: pos, position_span, format }
+        Argument {
+            position: pos,
+            position_span,
+            format,
+        }
     }
 
     /// Parses a positional argument for a format. This could either be an
@@ -532,23 +672,18 @@ impl<'a> Parser<'a> {
     }
 
     fn current_pos(&mut self) -> usize {
-        if let Some(&(pos, _)) = self.cur.peek() { pos } else { self.input.len() }
+        if let Some(&(pos, _)) = self.cur.peek() {
+            pos
+        } else {
+            self.input.len()
+        }
     }
 
     /// Parses a format specifier at the current position, returning all of the
     /// relevant information in the `FormatSpec` struct.
     fn format(&mut self) -> FormatSpec<'a> {
-        let mut spec = FormatSpec {
-            fill: None,
-            align: AlignUnknown,
-            flags: 0,
-            precision: CountImplied,
-            precision_span: None,
-            width: CountImplied,
-            width_span: None,
-            ty: &self.input[..0],
-            ty_span: None,
-        };
+        let mut spec = FormatSpec::new(&self.input[..0]);
+
         if !self.consume(':') {
             return spec;
         }
@@ -649,17 +784,8 @@ impl<'a> Parser<'a> {
     /// Parses an inline assembly template modifier at the current position, returning the modifier
     /// in the `ty` field of the `FormatSpec` struct.
     fn inline_asm(&mut self) -> FormatSpec<'a> {
-        let mut spec = FormatSpec {
-            fill: None,
-            align: AlignUnknown,
-            flags: 0,
-            precision: CountImplied,
-            precision_span: None,
-            width: CountImplied,
-            width_span: None,
-            ty: &self.input[..0],
-            ty_span: None,
-        };
+        let mut spec = FormatSpec::new(&self.input[..0]);
+
         if !self.consume(':') {
             return spec;
         }
@@ -679,7 +805,11 @@ impl<'a> Parser<'a> {
     /// width.
     fn count(&mut self, start: usize) -> Count<'a> {
         if let Some(i) = self.integer() {
-            if self.consume('$') { CountIsParam(i) } else { CountIs(i) }
+            if self.consume('$') {
+                CountIsParam(i)
+            } else {
+                CountIs(i)
+            }
         } else {
             let tmp = self.cur.clone();
             let word = self.word();
@@ -764,7 +894,11 @@ impl<'a> Parser<'a> {
             );
         }
 
-        if found { Some(cur) } else { None }
+        if found {
+            Some(cur)
+        } else {
+            None
+        }
     }
 
     fn suggest_positional_arg_instead_of_captured_arg(&mut self, arg: Argument<'a>) {
@@ -854,8 +988,11 @@ fn find_skips_from_snippet(
                 if let Some((next_pos, next_c)) = s.next() {
                     if next_c == '{' {
                         // consume up to 6 hexanumeric chars
-                        let digits_len =
-                            s.clone().take(6).take_while(|(_, c)| c.is_digit(16)).count();
+                        let digits_len = s
+                            .clone()
+                            .take(6)
+                            .take_while(|(_, c)| c.is_digit(16))
+                            .count();
 
                         let len_utf8 = s
                             .as_str()

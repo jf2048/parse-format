@@ -1,0 +1,11 @@
+[package]
+name = "parse-format"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/jf2048/parse-format.git"
+repository = "https://github.com/jf2048/parse-format.git"
+description = "Format string parser used by rustc"
+edition = "2021"
+
+[dependencies]
+unicode-ident = "1.0.5"

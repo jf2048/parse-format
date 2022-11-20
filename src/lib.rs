@@ -4,14 +4,14 @@
 //! Parsing does not happen at runtime: structures of `std::fmt::rt` are
 //! generated instead.
 
+mod display;
+
 pub use Alignment::*;
 pub use Count::*;
 pub use Flag::*;
 pub use Piece::*;
 pub use Position::*;
 
-use std::fmt::Display;
-use std::fmt::Write;
 use std::iter;
 use std::str;
 use std::string;
@@ -59,21 +59,6 @@ pub enum Piece<'a> {
     NextArgument(Argument<'a>),
 }
 
-impl<'a> Display for Piece<'a> {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            String(s) => {
-                if let Some(c @ ('{' | '}')) = s.chars().next() {
-                    f.write_char(c)?;
-                }
-                s.fmt(f)
-            }
-            NextArgument(a) => a.fmt(f),
-        }
-    }
-}
-
 /// Representation of an argument specification.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Argument<'a> {
@@ -84,16 +69,6 @@ pub struct Argument<'a> {
     pub position_span: InnerSpan,
     /// How to format the argument
     pub format: FormatSpec<'a>,
-}
-
-impl<'a> Display for Argument<'a> {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_char('{')?;
-        self.position.fmt(f)?;
-        self.format.fmt(f)?;
-        f.write_char('}')
-    }
 }
 
 /// Specification for the formatting of an argument in the format string.
@@ -152,41 +127,6 @@ impl<'a> Default for FormatSpec<'a> {
     }
 }
 
-impl<'a> Display for FormatSpec<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.is_empty() {
-            return Ok(());
-        }
-        f.write_char(':')?;
-        if let Some(fill) = self.fill {
-            f.write_char(fill)?;
-        }
-        self.align.fmt(f)?;
-        if self.flags & (1 << FlagSignPlus as u32) != 0 {
-            f.write_char('+')?;
-        } else if self.flags & (1 << FlagSignMinus as u32) != 0 {
-            f.write_char('-')?;
-        }
-        if self.flags & (1 << FlagAlternate as u32) != 0 {
-            f.write_char('#')?;
-        }
-        if self.flags & (1 << FlagSignAwareZeroPad as u32) != 0 {
-            f.write_char('0')?;
-        }
-        self.width.fmt(f)?;
-        if self.precision != CountImplied {
-            f.write_char('.')?;
-            self.precision.fmt(f)?;
-        }
-        if self.flags & (1 << FlagDebugLowerHex as u32) != 0 {
-            f.write_char('x')?;
-        } else if self.flags & (1 << FlagDebugUpperHex as u32) != 0 {
-            f.write_char('X')?;
-        }
-        self.ty.fmt(f)
-    }
-}
-
 /// Enum describing where an argument for a format can be located.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Position<'a> {
@@ -207,17 +147,6 @@ impl Position<'_> {
     }
 }
 
-impl<'a> Display for Position<'a> {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ArgumentImplicitlyIs(_) => Ok(()),
-            ArgumentIs(p) => p.fmt(f),
-            ArgumentNamed(s) => s.fmt(f),
-        }
-    }
-}
-
 /// Enum of alignments which are supported.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Alignment {
@@ -229,18 +158,6 @@ pub enum Alignment {
     AlignCenter,
     /// The value will take on a default alignment.
     AlignUnknown,
-}
-
-impl Display for Alignment {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AlignLeft => f.write_char('<'),
-            AlignRight => f.write_char('>'),
-            AlignCenter => f.write_char('^'),
-            AlignUnknown => Ok(()),
-        }
-    }
 }
 
 /// Various flags which can be applied to format strings. The meaning of these
@@ -277,24 +194,6 @@ pub enum Count<'a> {
     CountIsStar(usize),
     /// The count is implied and cannot be explicitly specified.
     CountImplied,
-}
-
-impl<'a> Display for Count<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CountIs(p) => p.fmt(f),
-            CountIsName(s, _) => {
-                s.fmt(f)?;
-                f.write_char('$')
-            }
-            CountIsParam(p) => {
-                p.fmt(f)?;
-                f.write_char('$')
-            }
-            CountIsStar(_) => f.write_char('*'),
-            CountImplied => Ok(()),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
